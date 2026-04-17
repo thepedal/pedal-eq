@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>Library</OutputType>
+
+    <!--
+      AssemblyName MUST contain ".NET" so ReBuzz recognises this as a
+      managed (.NET) machine and loads it with the correct host.
+    -->
+    <AssemblyName>Pedal EQ.NET</AssemblyName>
+    <RootNamespace>WDE.PedalEQ</RootNamespace>
+
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Optimize>true</Optimize>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+
+    <!--
+      Output goes directly into the ReBuzz Effects gear folder.
+      Override ReBuzzDir on the command line if ReBuzz lives elsewhere:
+        dotnet build PedalEQ.csproj -c Release /p:ReBuzzDir="D:\ReBuzz"
+    -->
+    <BuzzDir Condition="'$(BuzzDir)' == ''">C:\Program Files\ReBuzz</BuzzDir>
+    <OutputPath>$(BuzzDir)\Gear\Effects</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+
+    <AssemblyTitle>Pedal EQ</AssemblyTitle>
+    <Company>WDE</Company>
+    <Product>Pedal EQ</Product>
+    <Description>4-band parametric EQ for ReBuzz</Description>
+    <Copyright>© 2025 WDE</Copyright>
+    <Version>1.1.0</Version>
+  </PropertyGroup>
+
+  <!--
+    ReBuzz managed-machine API DLLs.
+    Private=false → they are NOT copied to the output folder;
+    ReBuzz already has them at runtime.
+    HintPaths resolve via $(BuzzDir).
+  -->
+  <ItemGroup>
+    <!-- Buzz.MachineInterface: IBuzzMachine, IBuzzMachineHost, MachineDecl,
+                                ParameterDecl, Sample, WorkModes, MasterInfo -->
+    <Reference Include="ReBuzz">
+      <HintPath>$(BuzzDir)\ReBuzz.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- BuzzGUI types used by the managed machine infrastructure -->
+    <Reference Include="BuzzGUI.Interfaces">
+      <HintPath>$(BuzzDir)\BuzzGUI.Interfaces.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

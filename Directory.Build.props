@@ -1,0 +1,27 @@
+<Project>
+  <!--
+    ============================================================
+    Set ReBuzzDir to wherever ReBuzz.exe is installed.
+
+    Common locations:
+      C:\Program Files\ReBuzz          (default — already set in .csproj)
+      C:\Users\<you>\AppData\Local\Programs\ReBuzz
+
+    You can override here once and never pass it on the command line:
+      <ReBuzzDir>D:\Tools\ReBuzz</ReBuzzDir>
+
+    Or pass it per-build:
+      dotnet build PedalEQ.csproj -c Release /p:ReBuzzDir="D:\Tools\ReBuzz"
+
+    Requirement: ReBuzz.dll and BuzzGUI.Interfaces.dll must exist in
+    that folder (they ship with every ReBuzz release).
+
+    SDK requirement: .NET 10 SDK (x64 Windows)
+      https://dotnet.microsoft.com/download/dotnet/10.0
+    ============================================================
+  -->
+  <PropertyGroup>
+    <ReBuzzDir Condition="'$(ReBuzzDir)' == ''">C:\Program Files\ReBuzz</ReBuzzDir>
+    <BuzzDir Condition="'$(BuzzDir)' == ''">$(ReBuzzDir)</BuzzDir>
+  </PropertyGroup>
+</Project>
