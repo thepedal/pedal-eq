@@ -19,6 +19,20 @@
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
 
     <!--
+      UseWPF: required for PedalEQGui (UserControl, DispatcherTimer, etc.).
+      The net10.0-windows TargetFramework suffix restricts this to Windows.
+    -->
+    <UseWPF>true</UseWPF>
+
+    <!--
+      Suppress .pdb and .deps.json — ReBuzz only needs the .dll.
+      Mandatory for every machine in this project (Build notes §1.2).
+    -->
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+
+    <!--
       Output goes directly into the ReBuzz Effects gear folder.
       Override ReBuzzDir on the command line if ReBuzz lives elsewhere:
         dotnet build PedalEQ.csproj -c Release /p:ReBuzzDir="D:\ReBuzz"
@@ -33,7 +47,7 @@
     <Product>Pedal EQ</Product>
     <Description>4-band parametric EQ for ReBuzz</Description>
     <Copyright>© 2025 WDE</Copyright>
-    <Version>1.1.0</Version>
+    <Version>1.4.0</Version>
   </PropertyGroup>
 
   <!--

@@ -12,14 +12,6 @@
 //     Engage one or more solos to hear only those bands in isolation.
 //     Solo routes through the existing crossfade — no additional DSP cost.
 //
-// v1.3 additions:
-//   • Silence detection: scans input peak each buffer; after 32 consecutive
-//     silent buffers (~170 ms — enough for filter states to fully decay) the
-//     biquad states are flushed to zero and Work() returns false.
-//     Returning false is the ReBuzz contract for "silent output"; the engine
-//     skips downstream processing. Flushing also prevents denormal floats
-//     accumulating during the decay tail.
-//
 // DSP: Audio EQ Cookbook (R. Bristow-Johnson) biquad formulae, Direct Form I.
 //
 // Build:   dotnet build PedalEQ.csproj -c Release
@@ -155,23 +147,23 @@ namespace WDE.PedalEQ
         // ── Frequency & Q lookup tables (ISO 1/3-octave series) ───────────────
         // Parameter value = array index.
 
-        static readonly int[] LS_FREQS =
+        internal static readonly int[] LS_FREQS =
         //   idx:  0   1   2   3   4   5    6    7    8    9   10   11   12   13   14
             { 20, 25, 32, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500 };
 
-        static readonly int[] LM_FREQS =
+        internal static readonly int[] LM_FREQS =
         //   idx:   0    1    2    3    4    5    6    7    8    9    10    11    12    13    14    15    16    17
             { 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000 };
 
-        static readonly int[] HM_FREQS =
+        internal static readonly int[] HM_FREQS =
         //   idx:   0    1    2     3     4     5     6     7     8     9     10    11    12    13     14    15
             { 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000 };
 
-        static readonly int[] HS_FREQS =
+        internal static readonly int[] HS_FREQS =
         //   idx:     0     1     2     3     4     5     6     7     8     9    10     11     12     13
             { 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000 };
 
-        static readonly double[] Q_VALUES =
+        internal static readonly double[] Q_VALUES =
         //   idx:   0     1     2     3     4     5     6     7     8     9    10    11    12    13    14    15    16
             { 0.3, 0.4,  0.5,  0.6,  0.7,  0.8,  1.0,  1.2,  1.4,  1.7,  2.0,  2.5,  3.0,  4.0,  5.0,  7.0, 10.0 };
 
@@ -190,13 +182,13 @@ namespace WDE.PedalEQ
         // Per-sample output gain ramp prevents clicks when Output is adjusted.
         float _gainCurrent = 1f;
 
-        // ── Silence detection ─────────────────────────────────────────────────
-        // Input peak below this value (~-90 dBFS relative to ±32768) counts as
-        // silence. 32 consecutive silent buffers gives ~170 ms at 44.1 kHz /
-        // 256-sample buffers — comfortably longer than any biquad ring-down.
-        const float SILENCE_THRESHOLD = 1.0f;
-        const int   SILENCE_HOLDOFF   = 32;
-        int         _silentBuffers    = 0;
+        // ── Solo mode: parallel filter states ────────────────────────────────
+        // Solo switches from serial to parallel topology. Each band filters the
+        // dry input independently; only soloed bands' outputs are summed.
+        // Separate state arrays avoid contaminating the serial-chain state.
+        readonly BiquadState[] stSoloL = new BiquadState[4];
+        readonly BiquadState[] stSoloR = new BiquadState[4];
+        bool _prevAnySolo = false;
 
         // ── Parameter cache ───────────────────────────────────────────────────
         int _sr;
@@ -221,7 +213,7 @@ namespace WDE.PedalEQ
         //  Parameters
         // =========================================================================
         //
-        //  Gain   MinValue = -48, MaxValue = 48  →  actual dB = paramValue × 0.5
+        //  Gain   MinValue = 0, MaxValue = 96, DefValue = 48  →  actual dB = (value - 48) × 0.5
         //         0 = 0.0 dB (flat), 97 ValueDescriptions strings
         //
         //  Freq   MinValue = 0, MaxValue = table.Length − 1  (index into table)
@@ -296,9 +288,9 @@ namespace WDE.PedalEQ
         [ParameterDecl(
             Name              = "LS Gain",
             Description       = "Low shelf gain (0.5 dB steps, 0 = flat)",
-            MinValue          = -48,
-            MaxValue          = 48,
-            DefValue          = 0,
+            MinValue          = 0,
+            MaxValue          = 96,
+            DefValue          = 48,
             ValueDescriptions = new[]
             {
                 "-24.0 dB", "-23.5 dB", "-23.0 dB", "-22.5 dB", "-22.0 dB", "-21.5 dB", "-21.0 dB", "-20.5 dB",
@@ -336,9 +328,9 @@ namespace WDE.PedalEQ
         [ParameterDecl(
             Name              = "LM Gain",
             Description       = "Low-mid peak gain (0.5 dB steps, 0 = flat)",
-            MinValue          = -48,
-            MaxValue          = 48,
-            DefValue          = 0,
+            MinValue          = 0,
+            MaxValue          = 96,
+            DefValue          = 48,
             ValueDescriptions = new[]
             {
                 "-24.0 dB", "-23.5 dB", "-23.0 dB", "-22.5 dB", "-22.0 dB", "-21.5 dB", "-21.0 dB", "-20.5 dB",
@@ -363,7 +355,6 @@ namespace WDE.PedalEQ
             MinValue          = 0,
             MaxValue          = 16,
             DefValue          = 6,   // Q 1.0
-            IsStateless       = true,
             ValueDescriptions = new[]
             {
                 "0.3", "0.4", "0.5", "0.6", "0.7", "0.8",
@@ -391,9 +382,9 @@ namespace WDE.PedalEQ
         [ParameterDecl(
             Name              = "HM Gain",
             Description       = "High-mid peak gain (0.5 dB steps, 0 = flat)",
-            MinValue          = -48,
-            MaxValue          = 48,
-            DefValue          = 0,
+            MinValue          = 0,
+            MaxValue          = 96,
+            DefValue          = 48,
             ValueDescriptions = new[]
             {
                 "-24.0 dB", "-23.5 dB", "-23.0 dB", "-22.5 dB", "-22.0 dB", "-21.5 dB", "-21.0 dB", "-20.5 dB",
@@ -418,7 +409,6 @@ namespace WDE.PedalEQ
             MinValue          = 0,
             MaxValue          = 16,
             DefValue          = 6,   // Q 1.0
-            IsStateless       = true,
             ValueDescriptions = new[]
             {
                 "0.3", "0.4", "0.5", "0.6", "0.7", "0.8",
@@ -446,9 +436,9 @@ namespace WDE.PedalEQ
         [ParameterDecl(
             Name              = "HS Gain",
             Description       = "High shelf gain (0.5 dB steps, 0 = flat)",
-            MinValue          = -48,
-            MaxValue          = 48,
-            DefValue          = 0,
+            MinValue          = 0,
+            MaxValue          = 96,
+            DefValue          = 48,
             ValueDescriptions = new[]
             {
                 "-24.0 dB", "-23.5 dB", "-23.0 dB", "-22.5 dB", "-22.0 dB", "-21.5 dB", "-21.0 dB", "-20.5 dB",
@@ -472,9 +462,9 @@ namespace WDE.PedalEQ
         [ParameterDecl(
             Name              = "Output",
             Description       = "Post-EQ output trim — ramped per sample to prevent clicks",
-            MinValue          = -48,
-            MaxValue          = 48,
-            DefValue          = 0,
+            MinValue          = 0,
+            MaxValue          = 96,
+            DefValue          = 48,
             ValueDescriptions = new[]
             {
                 "-24.0 dB", "-23.5 dB", "-23.0 dB", "-22.5 dB", "-22.0 dB", "-21.5 dB", "-21.0 dB", "-20.5 dB",
@@ -524,44 +514,32 @@ namespace WDE.PedalEQ
 
             double nyq = sr * 0.499;
 
-            // Solo logic: if any band is soloed, non-soloed bands become identity
-            // (flat pass-through). Multiple solos are additive — all soloed bands
-            // are heard together, which is useful for comparing adjacent bands.
-            bool anySolo = LSSolo != 0 || LMSolo != 0 || HMSolo != 0 || HSSolo != 0;
+            // Always compute the real filter for every band.
+            // Solo mode is handled in Work() by switching to parallel topology —
+            // non-soloed bands are simply not added to the output sum.
+            // Gain params: actual dB = (value - 48) × 0.5
+            c[0] = BiquadCoeffs.LowShelf(
+                       Math.Min(LS_FREQS[LSFreq], nyq),
+                       (LSGain - 48) * 0.5,
+                       sr);
 
-            // Gain params are half-dB integers → actual dB = value × 0.5
-            c[0] = (!anySolo || LSSolo != 0)
-                ? BiquadCoeffs.LowShelf(
-                      Math.Min(LS_FREQS[LSFreq], nyq),
-                      LSGain * 0.5,
-                      sr)
-                : BiquadCoeffs.Identity();
+            c[1] = BiquadCoeffs.Peak(
+                       Math.Min(LM_FREQS[LMFreq], nyq),
+                       (LMGain - 48) * 0.5,
+                       Q_VALUES[LMQ],
+                       sr);
 
-            c[1] = (!anySolo || LMSolo != 0)
-                ? BiquadCoeffs.Peak(
-                      Math.Min(LM_FREQS[LMFreq], nyq),
-                      LMGain * 0.5,
-                      Q_VALUES[LMQ],
-                      sr)
-                : BiquadCoeffs.Identity();
+            c[2] = BiquadCoeffs.Peak(
+                       Math.Min(HM_FREQS[HMFreq], nyq),
+                       (HMGain - 48) * 0.5,
+                       Q_VALUES[HMQ],
+                       sr);
 
-            c[2] = (!anySolo || HMSolo != 0)
-                ? BiquadCoeffs.Peak(
-                      Math.Min(HM_FREQS[HMFreq], nyq),
-                      HMGain * 0.5,
-                      Q_VALUES[HMQ],
-                      sr)
-                : BiquadCoeffs.Identity();
+            c[3] = BiquadCoeffs.HighShelf(
+                       Math.Min(HS_FREQS[HSFreq], nyq),
+                       (HSGain - 48) * 0.5,
+                       sr);
 
-            c[3] = (!anySolo || HSSolo != 0)
-                ? BiquadCoeffs.HighShelf(
-                      Math.Min(HS_FREQS[HSFreq], nyq),
-                      HSGain * 0.5,
-                      sr)
-                : BiquadCoeffs.Identity();
-
-            // Arm the crossfade. _blendRemain counts down from SMOOTH_SAMPLES
-            // to 0 inside Work(); alpha = 1 − remain/SMOOTH_SAMPLES sweeps 0→1.
             _blendRemain = SMOOTH_SAMPLES;
         }
 
@@ -572,10 +550,7 @@ namespace WDE.PedalEQ
         public bool Work(Sample[] output, Sample[] input, int n, WorkModes mode)
         {
             if (mode == WorkModes.WM_NOIO)
-            {
-                _silentBuffers = 0;
                 return false;
-            }
 
             // ── Bypass: transparent copy, no processing ───────────────────────
             if (Bypass != 0)
@@ -592,44 +567,10 @@ namespace WDE.PedalEQ
                 SnapshotParams(sr);
             }
 
-            // ── Silence detection ─────────────────────────────────────────────
-            // Scan input for peak amplitude. If the input stays below threshold
-            // for SILENCE_HOLDOFF consecutive buffers:
-            //   • Flush biquad states to zero (kills denormal accumulation).
-            //   • Snap _gainCurrent to target (no pending ramp to finish).
-            //   • Return false → ReBuzz marks our output silent and skips
-            //     any downstream machines that feed from us.
-            // The holdoff window (≥170 ms) is long enough for any biquad with
-            // these Q values to decay well below -120 dBFS.
-            float inputPeak = 0f;
-            for (int i = 0; i < n; i++)
-            {
-                float al = MathF.Abs(input[i].L);
-                float ar = MathF.Abs(input[i].R);
-                if (al > inputPeak) inputPeak = al;
-                if (ar > inputPeak) inputPeak = ar;
-            }
-
-            if (inputPeak < SILENCE_THRESHOLD)
-            {
-                if (++_silentBuffers > SILENCE_HOLDOFF)
-                {
-                    for (int i = 0; i < 4; i++) { stL[i].Reset(); stR[i].Reset(); }
-                    _gainCurrent = MathF.Pow(10f, OutGain * 0.025f);
-                    return false;
-                }
-                // Still within holdoff — fall through and process normally so
-                // the filter tail is rendered rather than cut off.
-            }
-            else
-            {
-                _silentBuffers = 0;   // live signal — reset the counter
-            }
-
             // ── Output gain ramp ──────────────────────────────────────────────
             // OutGain × 0.5 = dB  →  linear = 10^(dB/20) = 10^(OutGain/40)
             // Expressed compactly as 10^(OutGain × 0.025).
-            float targetGain = MathF.Pow(10f, OutGain * 0.025f);
+            float targetGain = MathF.Pow(10f, (OutGain - 48) * 0.025f);
             float gainStep   = (targetGain - _gainCurrent) / n;
 
             // ── Zero-work fast path ───────────────────────────────────────────
@@ -638,9 +579,9 @@ namespace WDE.PedalEQ
             bool anySolo = LSSolo != 0 || LMSolo != 0 || HMSolo != 0 || HSSolo != 0;
             bool allFlat = !anySolo
                         && _blendRemain == 0
-                        && LSGain  == 0 && LMGain == 0
-                        && HMGain  == 0 && HSGain == 0
-                        && OutGain == 0
+                        && LSGain  == 48 && LMGain == 48
+                        && HMGain  == 48 && HSGain == 48
+                        && OutGain == 48
                         && MathF.Abs(_gainCurrent - 1f) < 1e-6f;
             if (allFlat)
             {
@@ -648,15 +589,26 @@ namespace WDE.PedalEQ
                 return true;
             }
 
+            // ── Solo mode transition — reset the entering topology's states ──────
+            // Resetting on switch prevents stale history from causing a click.
+            // The 256-sample coefficient blend that fires simultaneously provides
+            // a smooth amplitude ramp that masks the state discontinuity.
+            if (anySolo != _prevAnySolo)
+            {
+                if (anySolo)
+                    for (int b = 0; b < 4; b++) { stSoloL[b].Reset(); stSoloR[b].Reset(); }
+                else
+                    for (int b = 0; b < 4; b++) { stL[b].Reset(); stR[b].Reset(); }
+                _prevAnySolo = anySolo;
+            }
+
             // ── Main DSP loop ─────────────────────────────────────────────────
             for (int i = 0; i < n; i++)
             {
-                // Coefficient blend: smoothly crossfades old→new coefficients
-                // over SMOOTH_SAMPLES, silencing zipper noise on any param change.
+                // Coefficient blend: crossfades old→new over SMOOTH_SAMPLES.
                 BiquadCoeffs b0, b1, b2, b3;
                 if (_blendRemain > 0)
                 {
-                    // alpha = 0 at blend start (fully old), 1 at blend end (fully new).
                     float alpha = 1f - (float)_blendRemain / SMOOTH_SAMPLES;
                     b0 = BiquadCoeffs.Lerp(cPrev[0], c[0], alpha);
                     b1 = BiquadCoeffs.Lerp(cPrev[1], c[1], alpha);
@@ -669,18 +621,40 @@ namespace WDE.PedalEQ
                     b0 = c[0]; b1 = c[1]; b2 = c[2]; b3 = c[3];
                 }
 
-                float l = input[i].L;
-                float r = input[i].R;
+                float inL = input[i].L;
+                float inR = input[i].R;
+                float outL, outR;
 
-                // Four bands in series — Low Shelf → Low-Mid → High-Mid → High Shelf
-                l = stL[0].Process(l, b0);  r = stR[0].Process(r, b0);
-                l = stL[1].Process(l, b1);  r = stR[1].Process(r, b1);
-                l = stL[2].Process(l, b2);  r = stR[2].Process(r, b2);
-                l = stL[3].Process(l, b3);  r = stR[3].Process(r, b3);
+                if (anySolo)
+                {
+                    // ── Parallel topology ─────────────────────────────────────
+                    // Each band filters the dry input independently.
+                    // Only soloed bands are summed into the output — non-soloed
+                    // bands are discarded, producing silence for those frequencies.
+                    BiquadCoeffs[] bArr = { b0, b1, b2, b3 };
+                    int[] soloFlags = { LSSolo, LMSolo, HMSolo, HSSolo };
 
-                // Per-sample gain ramp
+                    outL = 0f; outR = 0f;
+                    for (int b = 0; b < 4; b++)
+                    {
+                        float bL = stSoloL[b].Process(inL, bArr[b]);
+                        float bR = stSoloR[b].Process(inR, bArr[b]);
+                        if (soloFlags[b] != 0) { outL += bL; outR += bR; }
+                    }
+                }
+                else
+                {
+                    // ── Serial topology (normal) ──────────────────────────────
+                    // Low Shelf → Low-Mid → High-Mid → High Shelf
+                    outL = inL; outR = inR;
+                    outL = stL[0].Process(outL, b0); outR = stR[0].Process(outR, b0);
+                    outL = stL[1].Process(outL, b1); outR = stR[1].Process(outR, b1);
+                    outL = stL[2].Process(outL, b2); outR = stR[2].Process(outR, b2);
+                    outL = stL[3].Process(outL, b3); outR = stR[3].Process(outR, b3);
+                }
+
                 _gainCurrent += gainStep;
-                output[i] = new Sample(l * _gainCurrent, r * _gainCurrent);
+                output[i] = new Sample(outL * _gainCurrent, outR * _gainCurrent);
             }
 
             // Snap to exact target to prevent float accumulation drift.
