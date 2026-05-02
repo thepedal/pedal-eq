@@ -12,6 +12,14 @@
 //     Engage one or more solos to hear only those bands in isolation.
 //     Solo routes through the existing crossfade — no additional DSP cost.
 //
+// v1.3 additions:
+//   • Silence detection: scans input peak each buffer; after 32 consecutive
+//     silent buffers (~170 ms — enough for filter states to fully decay) the
+//     biquad states are flushed to zero and Work() returns false.
+//     Returning false is the ReBuzz contract for "silent output"; the engine
+//     skips downstream processing. Flushing also prevents denormal floats
+//     accumulating during the decay tail.
+//
 // DSP: Audio EQ Cookbook (R. Bristow-Johnson) biquad formulae, Direct Form I.
 //
 // Build:   dotnet build PedalEQ.csproj -c Release
@@ -181,6 +189,14 @@ namespace WDE.PedalEQ
 
         // Per-sample output gain ramp prevents clicks when Output is adjusted.
         float _gainCurrent = 1f;
+
+        // ── Silence detection ─────────────────────────────────────────────────
+        // Input peak below this value (~-90 dBFS relative to ±32768) counts as
+        // silence. 32 consecutive silent buffers gives ~170 ms at 44.1 kHz /
+        // 256-sample buffers — comfortably longer than any biquad ring-down.
+        const float SILENCE_THRESHOLD = 1.0f;
+        const int   SILENCE_HOLDOFF   = 32;
+        int         _silentBuffers    = 0;
 
         // ── Parameter cache ───────────────────────────────────────────────────
         int _sr;
@@ -556,7 +572,10 @@ namespace WDE.PedalEQ
         public bool Work(Sample[] output, Sample[] input, int n, WorkModes mode)
         {
             if (mode == WorkModes.WM_NOIO)
+            {
+                _silentBuffers = 0;
                 return false;
+            }
 
             // ── Bypass: transparent copy, no processing ───────────────────────
             if (Bypass != 0)
@@ -571,6 +590,40 @@ namespace WDE.PedalEQ
             {
                 RecalcCoefficients(sr);
                 SnapshotParams(sr);
+            }
+
+            // ── Silence detection ─────────────────────────────────────────────
+            // Scan input for peak amplitude. If the input stays below threshold
+            // for SILENCE_HOLDOFF consecutive buffers:
+            //   • Flush biquad states to zero (kills denormal accumulation).
+            //   • Snap _gainCurrent to target (no pending ramp to finish).
+            //   • Return false → ReBuzz marks our output silent and skips
+            //     any downstream machines that feed from us.
+            // The holdoff window (≥170 ms) is long enough for any biquad with
+            // these Q values to decay well below -120 dBFS.
+            float inputPeak = 0f;
+            for (int i = 0; i < n; i++)
+            {
+                float al = MathF.Abs(input[i].L);
+                float ar = MathF.Abs(input[i].R);
+                if (al > inputPeak) inputPeak = al;
+                if (ar > inputPeak) inputPeak = ar;
+            }
+
+            if (inputPeak < SILENCE_THRESHOLD)
+            {
+                if (++_silentBuffers > SILENCE_HOLDOFF)
+                {
+                    for (int i = 0; i < 4; i++) { stL[i].Reset(); stR[i].Reset(); }
+                    _gainCurrent = MathF.Pow(10f, OutGain * 0.025f);
+                    return false;
+                }
+                // Still within holdoff — fall through and process normally so
+                // the filter tail is rendered rather than cut off.
+            }
+            else
+            {
+                _silentBuffers = 0;   // live signal — reset the counter
             }
 
             // ── Output gain ramp ──────────────────────────────────────────────
