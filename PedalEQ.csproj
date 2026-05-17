@@ -3,11 +3,6 @@
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <OutputType>Library</OutputType>
-
-    <!--
-      AssemblyName MUST contain ".NET" so ReBuzz recognises this as a
-      managed (.NET) machine and loads it with the correct host.
-    -->
     <AssemblyName>Pedal EQ.NET</AssemblyName>
     <RootNamespace>WDE.PedalEQ</RootNamespace>
 
@@ -18,25 +13,14 @@
     <Optimize>true</Optimize>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
 
-    <!--
-      UseWPF: required for PedalEQGui (UserControl, DispatcherTimer, etc.).
-      The net10.0-windows TargetFramework suffix restricts this to Windows.
-    -->
+    <!-- Required for PedalEQGui (UserControl, DispatcherTimer, etc.) -->
     <UseWPF>true</UseWPF>
 
-    <!--
-      Suppress .pdb and .deps.json — ReBuzz only needs the .dll.
-      Mandatory for every machine in this project (Build notes §1.2).
-    -->
+    <!-- Suppress .pdb and .deps.json — ReBuzz only needs the .dll (Build notes §1.2) -->
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
     <GenerateDependencyFile>false</GenerateDependencyFile>
 
-    <!--
-      Output goes directly into the ReBuzz Effects gear folder.
-      Override ReBuzzDir on the command line if ReBuzz lives elsewhere:
-        dotnet build PedalEQ.csproj -c Release /p:ReBuzzDir="D:\ReBuzz"
-    -->
     <BuzzDir Condition="'$(BuzzDir)' == ''">C:\Program Files\ReBuzz</BuzzDir>
     <OutputPath>$(BuzzDir)\Gear\Effects</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
@@ -47,23 +31,14 @@
     <Product>Pedal EQ</Product>
     <Description>4-band parametric EQ for ReBuzz</Description>
     <Copyright>© 2025 WDE</Copyright>
-    <Version>1.4.0</Version>
+    <Version>1.2.0</Version>
   </PropertyGroup>
 
-  <!--
-    ReBuzz managed-machine API DLLs.
-    Private=false → they are NOT copied to the output folder;
-    ReBuzz already has them at runtime.
-    HintPaths resolve via $(BuzzDir).
-  -->
   <ItemGroup>
-    <!-- Buzz.MachineInterface: IBuzzMachine, IBuzzMachineHost, MachineDecl,
-                                ParameterDecl, Sample, WorkModes, MasterInfo -->
     <Reference Include="ReBuzz">
       <HintPath>$(BuzzDir)\ReBuzz.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <!-- BuzzGUI types used by the managed machine infrastructure -->
     <Reference Include="BuzzGUI.Interfaces">
       <HintPath>$(BuzzDir)\BuzzGUI.Interfaces.dll</HintPath>
       <Private>false</Private>

@@ -1,17 +1,5 @@
-// PedalEQGui — read-only band summary for Pedal EQ
-//
-// Discovery mechanism (confirmed from ReBuzz 1819-preview source):
-//   MachineDLL.GUIFactory scans the assembly for a type implementing
-//   IMachineGUIFactory, instantiates it, and calls CreateGUI().
-//   ParameterWindowVM then sets MachineGUI.Machine = machine and
-//   casts MachineGUI as FrameworkElement for EmbeddedGUI — which
-//   places it at the top of the parameter popup window.
-//
-//   IMachineGUI has one member: IMachine Machine { get; set; }
-//   IMachine.ManagedMachine returns the IBuzzMachine instance.
-//
-// [MachineGUIFactoryDecl] with default PreferWindowedGUI = false
-// → GUI appears embedded in the parameter window, not as a floating window.
+// PedalEQGui — read-only band summary panel for Pedal EQ
+// Discovered by ReBuzz via IMachineGUIFactory assembly scan (Core §26).
 
 using System;
 using System.Windows;
@@ -23,26 +11,14 @@ using BuzzGUI.Interfaces;
 
 namespace WDE.PedalEQ
 {
-    // =========================================================================
-    //  Factory — ReBuzz finds this by scanning for IMachineGUIFactory
-    // =========================================================================
-
     [MachineGUIFactoryDecl(PreferWindowedGUI = false)]
     public class PedalEQGuiFactory : IMachineGUIFactory
     {
-        public IMachineGUI CreateGUI(IMachineGUIHost host)
-        {
-            return new PedalEQGui();
-        }
+        public IMachineGUI CreateGUI(IMachineGUIHost host) => new PedalEQGui();
     }
-
-    // =========================================================================
-    //  GUI — UserControl (FrameworkElement) + IMachineGUI
-    // =========================================================================
 
     public class PedalEQGui : UserControl, IMachineGUI
     {
-        // ── Theme ─────────────────────────────────────────────────────────────
         static readonly Brush BG        = Freeze(new SolidColorBrush(Color.FromRgb(0x1c, 0x1c, 0x1c)));
         static readonly Brush FG        = Freeze(new SolidColorBrush(Color.FromRgb(0xcc, 0xcc, 0xcc)));
         static readonly Brush FG_DIM    = Freeze(new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)));
@@ -55,66 +31,45 @@ namespace WDE.PedalEQ
         static readonly FontFamily MONO = new FontFamily("Consolas");
         static T Freeze<T>(T b) where T : Freezable { b.Freeze(); return b; }
 
-        // ── Machine reference ─────────────────────────────────────────────────
         PedalEQMachine _eq;
-
-        // IMachineGUI — Machine setter is called by ParameterWindowVM after
-        // CreateGUI(). IMachine.ManagedMachine gives us PedalEQMachine directly.
         IMachine _machine;
         public IMachine Machine
         {
             get => _machine;
-            set
-            {
-                _machine = value;
-                _eq = value?.ManagedMachine as PedalEQMachine;
-            }
+            set { _machine = value; _eq = value?.ManagedMachine as PedalEQMachine; }
         }
 
-        // ── UI elements ───────────────────────────────────────────────────────
         TextBlock _tbBypass;
         readonly TextBlock[] _tbFreq = new TextBlock[4];
         readonly TextBlock[] _tbGain = new TextBlock[4];
         readonly TextBlock[] _tbQ    = new TextBlock[4];
         readonly TextBlock[] _tbSolo = new TextBlock[4];
         TextBlock _tbOut;
-
         DispatcherTimer _timer;
-
-        // =========================================================================
-        //  Constructor — parameterless, called by PedalEQGuiFactory.CreateGUI()
-        // =========================================================================
 
         public PedalEQGui()
         {
             Background = BG;
             Padding    = new Thickness(10, 8, 10, 8);
+            var root   = new StackPanel();
+            Content    = root;
 
-            var root = new StackPanel();
-            Content  = root;
-
-            // ── Header ──────────────────────────────────────────────────────
             var header = new Grid { Margin = new Thickness(0, 0, 0, 5) };
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
             var title = Lbl("PEDAL EQ", FG, 10.5, FontWeights.Bold);
             Grid.SetColumn(title, 0);
-
             _tbBypass = Lbl("", COL_BYP, 9, FontWeights.Bold);
             _tbBypass.HorizontalAlignment = HorizontalAlignment.Right;
             _tbBypass.VerticalAlignment   = VerticalAlignment.Center;
             Grid.SetColumn(_tbBypass, 1);
-
             header.Children.Add(title);
             header.Children.Add(_tbBypass);
             root.Children.Add(header);
             root.Children.Add(Sep());
 
-            // ── Band rows ────────────────────────────────────────────────────
             string[] names = { "LS", "LM", "HM", "HS" };
             bool[]   hasQ  = { false, true, true, false };
-
             for (int i = 0; i < 4; i++)
             {
                 var row = new Grid { Margin = new Thickness(0, 2, 0, 2) };
@@ -123,82 +78,48 @@ namespace WDE.PedalEQ
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
                 var lbl = Lbl(names[i], FG_DIM, 9.5, FontWeights.Bold);
                 Grid.SetColumn(lbl, 0);
-
-                _tbFreq[i] = Lbl("---", FG_FLAT, 9.5);
-                Grid.SetColumn(_tbFreq[i], 1);
-
-                _tbGain[i] = Lbl("---", FG_FLAT, 9.5);
-                Grid.SetColumn(_tbGain[i], 2);
-
-                _tbQ[i] = Lbl(hasQ[i] ? "---" : "", FG_DIM, 9.5);
-                Grid.SetColumn(_tbQ[i], 3);
-
+                _tbFreq[i] = Lbl("---", FG_FLAT, 9.5); Grid.SetColumn(_tbFreq[i], 1);
+                _tbGain[i] = Lbl("---", FG_FLAT, 9.5); Grid.SetColumn(_tbGain[i], 2);
+                _tbQ[i]    = Lbl(hasQ[i] ? "---" : "", FG_DIM, 9.5); Grid.SetColumn(_tbQ[i], 3);
                 _tbSolo[i] = Lbl("", COL_SOLO, 8.5, FontWeights.Bold);
                 _tbSolo[i].HorizontalAlignment = HorizontalAlignment.Right;
                 Grid.SetColumn(_tbSolo[i], 4);
-
-                row.Children.Add(lbl);       row.Children.Add(_tbFreq[i]);
+                row.Children.Add(lbl); row.Children.Add(_tbFreq[i]);
                 row.Children.Add(_tbGain[i]); row.Children.Add(_tbQ[i]);
                 row.Children.Add(_tbSolo[i]);
                 root.Children.Add(row);
             }
 
             root.Children.Add(Sep());
-
-            // ── Output row ───────────────────────────────────────────────────
             var outRow = new Grid { Margin = new Thickness(0, 2, 0, 0) };
             outRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
             outRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var outLbl = Lbl("Out", FG_DIM, 9.5, FontWeights.Bold);
-            Grid.SetColumn(outLbl, 0);
-            _tbOut = Lbl("---", FG_FLAT, 9.5);
-            Grid.SetColumn(_tbOut, 1);
-            outRow.Children.Add(outLbl);
-            outRow.Children.Add(_tbOut);
+            var outLbl = Lbl("Out", FG_DIM, 9.5, FontWeights.Bold); Grid.SetColumn(outLbl, 0);
+            _tbOut = Lbl("---", FG_FLAT, 9.5); Grid.SetColumn(_tbOut, 1);
+            outRow.Children.Add(outLbl); outRow.Children.Add(_tbOut);
             root.Children.Add(outRow);
 
-            Width = 248;
-
+            Width  = 248;
             _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
             _timer.Tick += (_, __) => Refresh();
             _timer.Start();
             Unloaded += (_, __) => _timer.Stop();
         }
 
-        // ── WPF helpers ───────────────────────────────────────────────────────
-
         static TextBlock Lbl(string t, Brush fg, double sz, FontWeight? w = null) =>
-            new TextBlock
-            {
-                Text              = t,
-                Foreground        = fg,
-                FontFamily        = MONO,
-                FontSize          = sz,
-                FontWeight        = w ?? FontWeights.Normal,
-                VerticalAlignment = VerticalAlignment.Center
-            };
+            new TextBlock { Text = t, Foreground = fg, FontFamily = MONO,
+                            FontSize = sz, FontWeight = w ?? FontWeights.Normal,
+                            VerticalAlignment = VerticalAlignment.Center };
 
         static Separator Sep() => new Separator
-        {
-            Margin     = new Thickness(0, 4, 0, 4),
-            Background = SEP_BG,
-            Height     = 1
-        };
-
-        // =========================================================================
-        //  Refresh — 10 fps on the dispatcher thread
-        //  Reads int properties directly from PedalEQMachine — atomic on x64.
-        // =========================================================================
+            { Margin = new Thickness(0, 4, 0, 4), Background = SEP_BG, Height = 1 };
 
         static readonly int[][] FREQ_TABLES =
         {
-            PedalEQMachine.LS_FREQS,
-            PedalEQMachine.LM_FREQS,
-            PedalEQMachine.HM_FREQS,
-            PedalEQMachine.HS_FREQS,
+            PedalEQMachine.LS_FREQS, PedalEQMachine.LM_FREQS,
+            PedalEQMachine.HM_FREQS, PedalEQMachine.HS_FREQS,
         };
 
         void Refresh()
@@ -216,7 +137,7 @@ namespace WDE.PedalEQ
             for (int i = 0; i < 4; i++)
             {
                 var table = FREQ_TABLES[i];
-                int hz = table[Math.Clamp(freqIdx[i], 0, table.Length - 1)];
+                int hz    = table[Math.Clamp(freqIdx[i], 0, table.Length - 1)];
                 _tbFreq[i].Text = hz >= 1000
                     ? $"{hz / 1000.0,4:0.##} kHz"
                     : $"{hz,4} Hz ";
