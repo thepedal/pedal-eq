@@ -1,4 +1,4 @@
-// Pedal EQ – ReBuzz managed effect machine  v1.2
+// Pedal EQ – ReBuzz managed effect machine  v1.3.1
 //
 // 4-band parametric EQ: Low Shelf | Low-Mid Peak | High-Mid Peak | High Shelf
 //
@@ -646,15 +646,12 @@ namespace WDE.PedalEQ
                 if (anySolo)
                 {
                     // Parallel: each band filters dry input; sum only soloed bands.
-                    BiquadCoeffs[] bArr   = { b0, b1, b2, b3 };
-                    int[]          soloFlags = { LSSolo, LMSolo, HMSolo, HSSolo };
+                    // (v1.3.1: was two array allocations per sample on the audio thread.)
                     outL = 0f; outR = 0f;
-                    for (int b = 0; b < 4; b++)
-                    {
-                        float bL = stSoloL[b].Process(inL, bArr[b]);
-                        float bR = stSoloR[b].Process(inR, bArr[b]);
-                        if (soloFlags[b] != 0) { outL += bL; outR += bR; }
-                    }
+                    SoloBand(0, inL, inR, b0, LSSolo, ref outL, ref outR);
+                    SoloBand(1, inL, inR, b1, LMSolo, ref outL, ref outR);
+                    SoloBand(2, inL, inR, b2, HMSolo, ref outL, ref outR);
+                    SoloBand(3, inL, inR, b3, HSSolo, ref outL, ref outR);
                 }
                 else
                 {
@@ -672,6 +669,14 @@ namespace WDE.PedalEQ
 
             _gainCurrent = targetGain;
             return true;
+        }
+
+        void SoloBand(int b, float inL, float inR, in BiquadCoeffs k, int solo,
+                      ref float outL, ref float outR)
+        {
+            float bL = stSoloL[b].Process(inL, k);
+            float bR = stSoloR[b].Process(inR, k);
+            if (solo != 0) { outL += bL; outR += bR; }
         }
     }
 }

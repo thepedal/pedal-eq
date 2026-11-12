@@ -102,11 +102,28 @@ namespace WDE.PedalEQ
             root.Children.Add(outRow);
 
             Width  = 248;
+
+            // Timer lifetime follows Loaded/Unloaded/IsVisibleChanged, not the
+            // constructor. ReBuzz unloads the embedded GUI when the Parameters/
+            // Editor tab is switched or the window is re-hosted, then loads the
+            // SAME object again. v1.3 stopped the timer on Unloaded and never
+            // restarted it, so the readout froze at its first values.
             _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
             _timer.Tick += (_, __) => Refresh();
-            _timer.Start();
-            Unloaded += (_, __) => _timer.Stop();
+            Loaded            += (_, __) => StartTimer();
+            Unloaded          += (_, __) => _timer.Stop();
+            IsVisibleChanged  += (_, e) => { if ((bool)e.NewValue) StartTimer(); else _timer.Stop(); };
         }
+
+        void StartTimer()
+        {
+            Refresh();                       // paint immediately, don't wait a tick
+            if (!_timer.IsEnabled) _timer.Start();
+        }
+
+        // Machine may be set before ManagedMachine exists (song load, first open);
+        // retry the cast until it succeeds rather than staying blank forever.
+        PedalEQMachine Eq => _eq ??= _machine?.ManagedMachine as PedalEQMachine;
 
         static TextBlock Lbl(string t, Brush fg, double sz, FontWeight? w = null) =>
             new TextBlock { Text = t, Foreground = fg, FontFamily = MONO,
@@ -124,14 +141,15 @@ namespace WDE.PedalEQ
 
         void Refresh()
         {
-            if (_eq == null) return;
+            var eq = Eq;
+            if (eq == null) return;
 
-            _tbBypass.Text = _eq.Bypass != 0 ? "BYPASS" : "";
+            _tbBypass.Text = eq.Bypass != 0 ? "BYPASS" : "";
 
-            int[] freqIdx = { _eq.LSFreq, _eq.LMFreq, _eq.HMFreq, _eq.HSFreq };
-            int[] gainRaw = { _eq.LSGain, _eq.LMGain, _eq.HMGain, _eq.HSGain };
-            int[] soloOn  = { _eq.LSSolo, _eq.LMSolo, _eq.HMSolo, _eq.HSSolo };
-            int[] qIdx    = { 0,          _eq.LMQ,    _eq.HMQ,    0          };
+            int[] freqIdx = { eq.LSFreq, eq.LMFreq, eq.HMFreq, eq.HSFreq };
+            int[] gainRaw = { eq.LSGain, eq.LMGain, eq.HMGain, eq.HSGain };
+            int[] soloOn  = { eq.LSSolo, eq.LMSolo, eq.HMSolo, eq.HSSolo };
+            int[] qIdx    = { 0,         eq.LMQ,    eq.HMQ,    0         };
             bool[] hasQ   = { false,      true,       true,       false       };
 
             for (int i = 0; i < 4; i++)
@@ -156,7 +174,7 @@ namespace WDE.PedalEQ
                 _tbSolo[i].Text = soloOn[i] != 0 ? "SOLO" : "";
             }
 
-            int    or2 = _eq.OutGain;
+            int    or2 = eq.OutGain;
             double odb = (or2 - 48) * 0.5;
             _tbOut.Text       = or2 == 48 ? " 0.0 dB" : $"{odb:+0.0;-0.0} dB";
             _tbOut.Foreground = or2 > 48 ? COL_BOOST : or2 < 48 ? COL_CUT : FG_FLAT;

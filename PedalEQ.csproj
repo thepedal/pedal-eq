@@ -31,7 +31,7 @@
     <Product>Pedal EQ</Product>
     <Description>4-band parametric EQ for ReBuzz</Description>
     <Copyright>© 2025 WDE</Copyright>
-    <Version>1.2.0</Version>
+    <Version>1.3.1</Version>
   </PropertyGroup>
 
   <ItemGroup>
